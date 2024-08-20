@@ -59,14 +59,14 @@ def center():
         if prompt.lower() == 'exit':
             break
         # user-center latency
+        start = time.time()
         time.sleep(random.uniform(0.1, 0.15))
         response = speculative_decoding(prompt)
         time.sleep(random.uniform(0.1, 0.015))
         print(f"Response: {response}")
+        end = time.time()
+        print(f"Time spent: {end - start}")
         
 if __name__ == "__main__":
     # measure time spent
-    start = time.time()
     center()
-    end = time.time()
-    print(f"Time spent: {end - start}")
