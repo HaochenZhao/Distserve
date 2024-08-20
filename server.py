@@ -1,5 +1,7 @@
 import socket
 import torch
+import time
+import random
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 def run_server():
@@ -29,6 +31,15 @@ def run_server():
             outputs = model.generate(inputs["input_ids"], num_return_sequences=1)
             
             response_tokens = [tokenizer.decode(output, skip_special_tokens=True) for output in outputs]
+            # data center network latency
+            # torch.distributed.barrier()
+            time.sleep(random.uniform(0.01, 0.05))
+            
+            # for debugging
+            print(f"Received: {prompt}")
+            print(f"Response: {response_tokens}")
+            print("--------------------")
+            
             conn.sendall(str(response_tokens).encode('utf-8'))
 
 if __name__ == "__main__":

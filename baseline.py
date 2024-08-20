@@ -1,26 +1,42 @@
 import socket
 import torch
-import random
 import time
+import random
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-def run_client():
+def edge(prompt):
+    # Load the smaller model and tokenizer
+    model_id = 'facebook/opt-125m'
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    model = AutoModelForCausalLM.from_pretrained(model_id)
+    model.eval()
+
+    inputs = tokenizer(prompt, return_tensors="pt")
+    outputs = model.generate(inputs["input_ids"], num_return_sequences=1)
+            
+    response_tokens = [tokenizer.decode(output, skip_special_tokens=True) for output in outputs]
+    # data center network latency
+    # torch.distributed.barrier()
+    time.sleep(random.uniform(0.01, 0.05))
+            
+    # for debugging
+    print(f"Received: {prompt}")
+    print(f"Response: {response_tokens}")
+    print("--------------------")
+    
+    return response_tokens
+
+def center():
     # Load the larger model and tokenizer
     model_id = 'facebook/opt-1.3b'
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = AutoModelForCausalLM.from_pretrained(model_id)
     model.eval()
 
-    # Connect to server
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client_socket.connect(('127.0.0.1', 4444))
 
     def speculative_decoding(prompt):
-        # data center network latency
-        time.sleep(random.uniform(0.01, 0.05))
-        client_socket.sendall(prompt.encode('utf-8'))
-        data = client_socket.recv(4096)
-        predictions = eval(data.decode('utf-8'))
+        
+        predictions = edge(prompt)
 
         # Validate predictions with the larger model
         inputs = tokenizer(prompt, return_tensors="pt")
@@ -42,14 +58,15 @@ def run_client():
         prompt = input("Enter your prompt: ")
         if prompt.lower() == 'exit':
             break
-        start_time = time.time()
-        # user-edge latency
-        time.sleep(random.uniform(0.01, 0.02))
-        response = speculative_decoding(prompt)
+        # user-center latency
         time.sleep(random.uniform(0.1, 0.15))
+        response = speculative_decoding(prompt)
+        time.sleep(random.uniform(0.1, 0.015))
         print(f"Response: {response}")
-        end_time = time.time()
-        print(f"Latency: {end_time - start_time} seconds")
-
+        
 if __name__ == "__main__":
-    run_client()
+    # measure time spent
+    start = time.time()
+    center()
+    end = time.time()
+    print(f"Time spent: {end - start}")
