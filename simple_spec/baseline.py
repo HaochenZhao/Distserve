@@ -6,7 +6,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 def edge(prompt):
     # Load the smaller model and tokenizer
-    model_id = 'facebook/opt-125m'
+    model_id = 'facebook/opt-1.3b'
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = AutoModelForCausalLM.from_pretrained(model_id)
     model.eval()
@@ -28,7 +28,7 @@ def edge(prompt):
 
 def center():
     # Load the larger model and tokenizer
-    model_id = 'facebook/opt-1.3b'
+    model_id = 'facebook/opt-6.7b'
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = AutoModelForCausalLM.from_pretrained(model_id)
     model.eval()

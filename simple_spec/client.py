@@ -6,7 +6,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 def run_client():
     # Load the larger model and tokenizer
-    model_id = 'facebook/opt-1.3b'
+    model_id = 'facebook/opt-6.7b'
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = AutoModelForCausalLM.from_pretrained(model_id)
     model.eval()
