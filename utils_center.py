@@ -3,6 +3,11 @@ import inspect
 import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
+import requests
+import json
+import pickle
+import base64
+
 
 import torch
 import torch.distributed as dist
@@ -275,6 +280,7 @@ class MyGenerationMixin(GenerationMixin):
                 raise ValueError("assisted generate requires `use_cache=True`")
 
             # 11. Get the candidate generator, given the parameterization
+            # TODO: distserve
             candidate_generator = self._get_candidate_generator(
                 generation_config=generation_config,
                 input_ids=input_ids,
@@ -283,6 +289,20 @@ class MyGenerationMixin(GenerationMixin):
                 logits_processor=logits_processor,
                 model_kwargs=model_kwargs,
             )
+            data = {
+                'generation_config': generation_config,
+                'input_ids': input_ids,
+                'inputs_tensor': inputs_tensor,
+                # 'assistant_model': assistant_model,
+                'logits_processor': logits_processor,
+                'model_kwargs': model_kwargs,
+            }
+            pdata = pickle.dumps(data)
+            response = requests.post("http://127.0.0.1:4444/init", data=pdata)
+            if response.json()['status'] == 200:
+                print(response.json())
+            else:
+                raise ValueError("Error in response")
 
             # 12. run assisted generate
             result = self.assisted_decoding(
@@ -640,7 +660,12 @@ class MyGenerationMixin(GenerationMixin):
             cur_len = input_ids.shape[-1]
 
             #  1. Fetch candidate sequences from a `CandidateGenerator`
-            candidate_input_ids, candidate_logits = candidate_generator.get_candidates(input_ids)
+            # TODO: distserve
+            pdata = pickle.dumps(input_ids)
+            response = requests.post("http://127.0.0.1:4444/generate", data=pdata).json()['output']
+            response = pickle.loads(base64.b64decode(response))
+            # candidate_input_ids, candidate_logits = candidate_generator.get_candidates(input_ids)
+            candidate_input_ids, candidate_logits = response['candidate_input_ids'], response['candidate_logits']
             candidate_input_ids = candidate_input_ids.to(self.device)
             if candidate_logits is not None:
                 candidate_logits = candidate_logits.to(self.device)
@@ -741,6 +766,7 @@ class MyGenerationMixin(GenerationMixin):
             outputs.past_key_values = _crop_past_key_values(self, outputs.past_key_values, new_cache_size)
 
             # 5. Update the candidate generation strategy if needed
+            # TODO: distserve
             candidate_generator.update_candidate_strategy(input_ids, new_logits, n_matches)
 
             if synced_gpus and this_peer_finished:
