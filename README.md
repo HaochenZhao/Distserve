@@ -1,1 +1,1 @@
-python localtest.py
+python local_test.py
