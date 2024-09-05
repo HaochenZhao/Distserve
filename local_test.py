@@ -18,6 +18,7 @@ tokenizer = AutoTokenizer.from_pretrained("../models/opt-1.3B")
 if __name__ == "__main__":
     
     #prompt = input("Enter your prompt: ")
+    #目前我认为问题出在采样的代码，因为理论上表现是有target model保底的，但是目前结果没有逻辑性
     prompt = "Emily found a mysterious letter on her doorstep one sunny morning."
     input_ids = tokenizer(prompt, return_tensors="pt")['input_ids']
     while(input_ids.shape[1]<64):

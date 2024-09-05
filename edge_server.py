@@ -197,10 +197,10 @@ class Draft_model:
         del mask_index, mask_index_list, noleaf_index, noleaf_num, leaf_num, max_depth, rid
         tree_position_ids = tree_position_ids.to(self.device)
 
-        #draft_tokens.shape = (1,33)
-        #retrieve_indices.shape = (15,7)
-        #tree_mask.shape = (1,1,33,33)
-        #tree_position_ids.shape = (33)
+        #draft_tokens.shape = (1,topk)
+        #retrieve_indices.shape = e.g. (15,7) 候选序列数*最长长度
+        #tree_mask.shape = (1,1,topk,topk)
+        #tree_position_ids.shape = (topk)
 
         self.stable_kv = None
         return draft_tokens, retrieve_indices, tree_mask, tree_position_ids
