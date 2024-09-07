@@ -21,7 +21,7 @@ if __name__ == "__main__":
     #目前我认为问题出在采样的代码，因为理论上表现是有target model保底的，但是目前结果没有逻辑性
     prompt = "Emily found a mysterious letter on her doorstep one sunny morning."
     input_ids = tokenizer(prompt, return_tensors="pt")['input_ids']
-    while(input_ids.shape[1]<64):
+    while(input_ids.shape[1]<32):
         draft_tokens, retrieve_indices, tree_mask, tree_position_ids = draft_model.generate_tree(input_ids)
         input_ids = target_model.sampling(input_ids, draft_tokens, retrieve_indices, tree_mask, tree_position_ids)
         

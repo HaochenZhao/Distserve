@@ -36,8 +36,9 @@ class Target_model:
         #tree_mask.shape = (1,1,33,33)
         #tree_position_ids.shape = (33)
 
-        print(retrieve_indices)
-        
+        # print(retrieve_indices)
+
+        input_ids = input_ids[:,:-1]
         input_ids = input_ids.to(self.device)
         draft_tokens = draft_tokens.to(input_ids.device)
         tree_mask = tree_mask.to(input_ids.device)
@@ -49,11 +50,11 @@ class Target_model:
         tmp_mask = torch.cat((tmp_mask, tree_mask[0][0]), dim=1)
         tmp_mask = tmp_mask.to(torch.int)
         
-        print(tmp_input_ids)
-        print(tmp_mask)
+        # print(tmp_input_ids)
+        # print(tmp_mask)
         
         output = self.model(input_ids=tmp_input_ids, attention_mask=tmp_mask)
-        print(output.logits.shape)
+        # print(output.logits.shape)
         logits = output.logits
         logits = logits[retrieve_indices,-1]
         
@@ -107,7 +108,7 @@ class Target_model:
             retrieve_indices[best_candidate, : accept_length] + prev_input_len
         )
         input_ids = torch.cat(
-            [input_ids, candidates[None, best_candidate,1:accept_length].to(input_ids.device)], dim=-1
+            [input_ids, candidates[None, best_candidate,:accept_length].to(input_ids.device)], dim=-1
         )
         token = torch.argmax(sample_p)
         token = token[None, None]
