@@ -25,17 +25,18 @@ parser.add_argument('--topk', default=8, type=int, help='TopK')
 parser.add_argument('--total_tokens', default=32, type=int, help='TopK')
 args = parser.parse_args()
 
+
 class Draft_model:
 
     def __init__(self, model_name_or_path, topk, depth, total_tokens):
-        pretrained_model = AutoModelForCausalLM.from_pretrained(model_name_or_path, device_map="auto")
+        pretrained_model = AutoModelForCausalLM.from_pretrained(model_name_or_path, device_map="auto", offload_folder="../offload")
         pretrained_model.eval()
         self.topk = topk
         self.depth = depth
         self.total_tokens = total_tokens
         self.decoder = pretrained_model.model.decoder
         self.logsoftmax = nn.LogSoftmax(dim=-1)
-        self.device =  "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.stable_kv = None
         self.lm_head = pretrained_model.lm_head
 
@@ -56,7 +57,7 @@ class Draft_model:
         self.tree_mask = None
         if self.stable_kv is not None:
             kv_len = self.stable_kv[0][0].shape[2]
-            
+
             output = self.decoder(
                 input_ids, past_key_values=self.stable_kv, use_cache=True
             )
@@ -102,7 +103,7 @@ class Draft_model:
             parents = (topk_cs_index + bias)
             parents_list.append(parents)
 
-            last_p = self.logsoftmax(self.lm_head(output.last_hidden_state[:,-1]))
+            last_p = self.logsoftmax(self.lm_head(output.last_hidden_state[:, -1]))
             top = torch.topk(last_p, self.topk, dim=-1)
             topk_index, topk_p = top.indices, top.values
 
@@ -126,12 +127,6 @@ class Draft_model:
             ss_token.append(topk_index)
             scores_list.append(cu_scores)
 
-        # scores_list: shape(51,10)->(510) The scores of each father's children
-        # ss_token_list: shape(51,10)->(510) The id of each node
-        # draft_parents: shape(total_tokens) The father of each node
-        # mask_index_list: list[total_tokens] The mapping of each node's father in top
-        # tree_mask The i-th row is the mask of all parents of the i-th path
-
         scores_list = torch.cat(scores_list, dim=0).view(-1)
         ss_token_list = torch.cat(ss_token, dim=0).view(-1)
 
@@ -142,9 +137,9 @@ class Draft_model:
         draft_tokens = draft_tokens.to(sample_token.device)
         draft_tokens = torch.cat((sample_token, draft_tokens), dim=0)
         draft_parents = parents_list[0].to(self.device)
-        for i in range(1,len(parents_list)):
+        for i in range(1, len(parents_list)):
             parents_list[i] = parents_list[i].to(self.device)
-            draft_parents = torch.cat((draft_parents, parents_list[i]),dim=0)
+            draft_parents = torch.cat((draft_parents, parents_list[i]), dim=0)
         top_scores_index = top_scores_index.to(draft_parents.device)
         draft_parents = draft_parents[top_scores_index // self.topk].long()
         mask_index = torch.searchsorted(top_scores_index, draft_parents - 1, right=False)
@@ -158,8 +153,14 @@ class Draft_model:
 
         tree_position_ids = torch.sum(tree_mask, dim=1) - 1
 
-        tree_mask = tree_mask.float()[None, None]
+        del tree_mask
         draft_tokens = draft_tokens[None]
+
+        # scores_list: shape(51,10)->(510) The scores of each father's children
+        # ss_token_list: shape(51,10)->(510) The id of each node
+        # draft_parents: shape(total_tokens) The father of each node
+        # mask_index_list: list[total_tokens] The mapping of each node's father in top
+        # tree_mask The i-th row is the mask of all parents of the i-th path
 
         del parents_list, scores_list, ss_token, ss_token_list, draft_parents
 
@@ -171,12 +172,20 @@ class Draft_model:
         # The node storing the jth depth of the i-th path is retrieve_indices[i][j]
         retrieve_indices = torch.zeros(leaf_num, max_depth.item(), dtype=torch.long) - 1
         retrieve_indices = retrieve_indices.tolist()
+        token_indices = torch.zeros(self.total_tokens+1, max_depth.item(), dtype=torch.long) - 1
+
 
         # Match candidate sequence matrix
         rid = 0
         position_ids_list = tree_position_ids.tolist()
 
         for i in range(self.total_tokens + 1):
+            cid = i
+            depth = position_ids_list[i]
+            for j in reversed(range(depth + 1)):
+                token_indices[i][j] = cid
+                cid = mask_index_list[cid - 1]
+
             if i not in noleaf_index:
                 cid = i
                 depth = position_ids_list[i]
@@ -186,37 +195,40 @@ class Draft_model:
                 rid += 1
 
         maxitem = self.total_tokens + 5
+
         def custom_sort(lst):
             sort_keys = []
             for i in range(len(lst)):
                 sort_keys.append(lst[i] if lst[i] >= 0 else maxitem)
             return sort_keys
+
         retrieve_indices = sorted(retrieve_indices, key=custom_sort)
 
         retrieve_indices = torch.tensor(retrieve_indices, dtype=torch.long)
         del mask_index, mask_index_list, noleaf_index, noleaf_num, leaf_num, max_depth, rid
         tree_position_ids = tree_position_ids.to(self.device)
 
-        #draft_tokens.shape = (1,topk)
-        #retrieve_indices.shape = e.g. (15,7) 候选序列数*最长长度
-        #tree_mask.shape = (1,1,topk,topk)
-        #tree_position_ids.shape = (topk)
+        # draft_tokens.shape = (1,33)
+        # retrieve_indices.shape = (15,7)
+        # tree_mask.shape = (1,1,33,33)
+        # tree_position_ids.shape = (33)
 
         self.stable_kv = None
-        return draft_tokens, retrieve_indices, tree_mask, tree_position_ids
-    
+        return draft_tokens, retrieve_indices, token_indices, tree_position_ids
+
+
 class Edge_server:
     def __init__(self):
-        
+
         self.edge2server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.client2edge_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.client2edge_socket.bind(('127.0.0.1', 4009))
         self.client2edge_socket.listen(1)
         print("listening to client2edge")
-        
+
         self.model = Draft_model(args.draft_model, args.topk, args.depth, args.total_tokens)
         self.tokenizer = AutoTokenizer.from_pretrained(args.draft_model)
-        
+
     def send_tensor_over_socket(self, tensor, sock):
         tensor_bytes = pickle.dumps(tensor)
         tensor_length = len(tensor_bytes)
@@ -224,7 +236,7 @@ class Edge_server:
         sock.sendall(length_bytes + tensor_bytes)
 
     def run_edge(self):
-    
+
         conn, addr = self.client2edge_socket.accept()
         print("client2edge accepted, tring to connect edge2server")
         self.edge2server_socket.connect(('127.0.0.1', 4002))
@@ -236,27 +248,17 @@ class Edge_server:
                 if not data: break
                 prompt = data.decode('utf-8')
                 input_ids = self.tokenizer(prompt, return_tensors="pt")['input_ids']
-                draft_tokens, retrieve_indices, tree_mask, tree_position_ids = self.model.generate_tree(input_ids)
-                
+                draft_tokens, retrieve_indices, token_indices, tree_position_ids = self.model.generate_tree(input_ids)
+
                 with self.edge2server_socket as server_conn:
                     self.send_tensor_over_socket(input_ids, server_conn)
                     self.send_tensor_over_socket(draft_tokens, server_conn)
                     self.send_tensor_over_socket(retrieve_indices, server_conn)
-                    self.send_tensor_over_socket(tree_mask, server_conn)
+                    self.send_tensor_over_socket(token_indices, server_conn)
                     self.send_tensor_over_socket(tree_position_ids, server_conn)
+
 
 if __name__ == "__main__":
     edge = Edge_server()
     edge.run_edge()
 
-
-    
-
-
-    # def run_edge(self):
-    #     prompt = "Emily found a mysterious letter on her doorstep one morning."
-    #     input_ids = self.tokenizer(prompt, return_tensors="pt")['input_ids']
-    #     draft_tokens, retrieve_indices, tree_mask, tree_position_ids = self.model.generate_tree(input_ids)
-    #     s = Server()
-    #     input_ids = s.sampling(input_ids, draft_tokens, retrieve_indices, tree_mask, tree_position_ids)
-    #     print(self.tokenizer.decode(input_ids[0]))
